@@ -237,6 +237,209 @@ app.post("/api/webhook/mercadopago", async (req, res) => {
     res.sendStatus(500);
   }
 });
+// 🚀 Carrega todos os dados do usuário logado
+app.get('/api/initial-data', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    console.log(`📦 Carregando dados do usuário ID: ${userId}`);
+
+    const [folders, decks, flashcards, planners, files] = await Promise.all([
+      pool.query('SELECT * FROM folders WHERE user_id = $1 AND deleted_at IS NULL', [userId]),
+      pool.query('SELECT * FROM decks WHERE user_id = $1 AND deleted_at IS NULL', [userId]),
+      pool.query('SELECT * FROM flashcards WHERE user_id = $1 AND deleted_at IS NULL', [userId]),
+      pool.query('SELECT * FROM planners WHERE user_id = $1 AND deleted_at IS NULL', [userId]),
+      pool.query('SELECT * FROM files WHERE user_id = $1 AND deleted_at IS NULL', [userId]),
+    ]);
+
+    console.log(`📂 Pastas encontradas: ${folders.rows.length}`);
+    console.log(`📘 Decks encontrados: ${decks.rows.length}`);
+    console.log(`💬 Flashcards encontrados: ${flashcards.rows.length}`);
+    console.log(`📅 Planners encontrados: ${planners.rows.length}`);
+    console.log(`📁 Files encontrados: ${files.rows.length}`);
+
+    // 🔍 Aqui é onde geralmente o erro acontece
+    const decksWithCards = decks.rows.map(deck => {
+      const cards = flashcards.rows
+        .filter(card => Number(card.deck_id) === Number(deck.id))
+        .map(card => ({
+          id: card.id,
+          question: card.front,
+          answer: card.back,
+          commentary: card.commentary || '',
+          srsLevel: card.srs_level || 0,
+          nextReviewDate: card.next_review_date,
+          reviewHistory: []
+        }));
+      return { ...deck, cards };
+    });
+
+    console.log(`✅ Retornando ${decksWithCards.length} decks prontos.`);
+
+    res.json({
+      folders: folders.rows,
+      decks: decksWithCards,
+      flashcards: flashcards.rows,
+      planners: planners.rows,
+      files: files.rows,
+    });
+  } catch (err) {
+    console.error('❌ Erro ao carregar dados iniciais:', err);
+    res.status(500).json({ message: 'Erro ao carregar dados do usuário.', error: err.message });
+  }
+});
+
+// 🆕 Criar novo deck
+app.post("/api/decks", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name, type } = req.body;
+
+    if (!name || !type)
+      return res.status(400).json({ message: "Nome e tipo são obrigatórios." });
+
+    const result = await pool.query(
+      `INSERT INTO decks (user_id, name, type, created_at, folder_id)
+       VALUES ($1, $2, $3, NOW(), NULL)
+       RETURNING *`,
+      [userId, name, type]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Erro ao criar deck:", err);
+    res.status(500).json({ message: "Erro ao criar deck." });
+  }
+});
+
+// 📦 Listar decks
+app.get("/api/decks", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await pool.query(
+      `SELECT * FROM decks
+       WHERE user_id = $1
+       AND deleted_at IS NULL
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Erro ao buscar decks:", err);
+    res.status(500).json({ message: "Erro ao buscar decks." });
+  }
+});
+
+// 🗂️ Criar nova pasta
+app.post("/api/folders", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    let { name, type } = req.body;
+
+    if (!name) return res.status(400).json({ message: "Nome da pasta é obrigatório." });
+    if (!type || (type !== "flashcards" && type !== "questions")) type = "flashcards";
+
+    const result = await pool.query(
+      `INSERT INTO folders (user_id, name, type, created_at)
+       VALUES ($1, $2, $3, NOW())
+       RETURNING *`,
+      [userId, name, type]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("❌ Erro ao criar pasta:", err);
+    res.status(500).json({ message: "Erro ao criar pasta." });
+  }
+});
+
+// 📋 Listar pastas
+app.get("/api/folders", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await pool.query(
+      `SELECT * FROM folders
+       WHERE user_id = $1
+       AND deleted_at IS NULL
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Erro ao buscar pastas:", err);
+    res.status(500).json({ message: "Erro ao buscar pastas." });
+  }
+});
+
+// 🆕 Criar novo flashcard
+app.post("/api/flashcards", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { deck_id, front, back, srs_level, next_review_date } = req.body;
+
+    if (!deck_id || !front || !back)
+      return res.status(400).json({ message: "Campos obrigatórios ausentes." });
+
+    const result = await pool.query(
+      `INSERT INTO flashcards (user_id, deck_id, front, back, srs_level, next_review_date, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING *`,
+      [userId, deck_id, front, back, srs_level || 0, next_review_date || null]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Erro ao criar flashcard:", err);
+    res.status(500).json({ message: "Erro ao criar flashcard." });
+  }
+});
+
+// ✏️ Atualizar flashcard existente
+app.put("/api/flashcards/:id", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    const { front, back, srs_level, next_review_date } = req.body;
+
+    const result = await pool.query(
+      `UPDATE flashcards
+       SET front = $1, back = $2, srs_level = $3, next_review_date = $4
+       WHERE id = $5 AND user_id = $6
+       RETURNING *`,
+      [front, back, srs_level, next_review_date, id, userId]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ message: "Flashcard não encontrado." });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Erro ao atualizar flashcard:", err);
+    res.status(500).json({ message: "Erro ao atualizar flashcard." });
+  }
+});
+
+// ❌ Deletar flashcard
+app.delete("/api/flashcards/:id", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `DELETE FROM flashcards WHERE id = $1 AND user_id = $2 RETURNING id`,
+      [id, userId]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ message: "Flashcard não encontrado." });
+
+    res.json({ message: "Flashcard removido com sucesso.", id });
+  } catch (err) {
+    console.error("Erro ao excluir flashcard:", err);
+    res.status(500).json({ message: "Erro ao excluir flashcard." });
+  }
+});
 
 
 
@@ -246,3 +449,4 @@ app.get("/", (req, res) => res.send("✅ API MedRecall rodando com Stripe e Merc
 // 🚀 SERVIDOR
 const PORT = 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor em http://localhost:${PORT}`));
+
