@@ -3,7 +3,8 @@ import express from "express";
 import webhookRoutes from "./api/webhook.js";
 
 import cors from "cors";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
+
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import pkg from "pg";
