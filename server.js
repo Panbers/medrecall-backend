@@ -39,6 +39,15 @@ export const pool = new Pool({
   database: process.env.PG_DATABASE,
   ssl: { rejectUnauthorized: false } // 👈 obrigatório no Supabase
 });
+// Teste de conexão com o banco
+pool.connect()
+  .then(client => {
+    console.log('✅ Conectado ao banco de dados PostgreSQL com sucesso!');
+    client.release();
+  })
+  .catch(err => {
+    console.error('❌ Erro ao conectar ao banco de dados:', err.message);
+  });
 
 // 🔐 FUNÇÃO JWT
 function verifyToken(req, res, next) {
