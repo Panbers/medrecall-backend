@@ -37,6 +37,7 @@ export const pool = new Pool({
   host: process.env.PG_HOST,
   port: process.env.PG_PORT,
   database: process.env.PG_DATABASE,
+  ssl: { rejectUnauthorized: false } // 👈 obrigatório no Supabase
 });
 
 // 🔐 FUNÇÃO JWT
